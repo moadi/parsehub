@@ -19,10 +19,12 @@ var (
 
 	// ServerTimeout is the default amount of time for which the proxy server waits for the
 	// HTTP client to finish
-	ServerTimeout = 5 * time.Second
+	ServerTimeout = time.Duration(5 * time.Second)
 )
 
-func ProxyServeHTTPHandler(w http.ResponseWriter, r *http.Request) {
+// proxyServerHTTPHandler implements the same handler for
+// GET and POST requests to the /proxy/ endpoint
+func proxyServerHTTPHandler(w http.ResponseWriter, r *http.Request) {
 	receivedURL := mux.Vars(r)["url"]
 	log.Printf("Received %s request for %s", r.Method, receivedURL)
 
@@ -34,6 +36,7 @@ func ProxyServeHTTPHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req, err := http.NewRequest(r.Method, receivedURL, r.Body)
+	// need to specify the same User-Agent as the incoming request
 	req.Header.Set("User-Agent", r.UserAgent())
 
 	ctx, cancel := context.WithTimeout(req.Context(), ServerTimeout)
@@ -72,7 +75,7 @@ func startHTTPServer() *http.Server {
 	timeout := os.Getenv("TIMEOUT")
 	if len(timeout) != 0 {
 		tmpTimeout, err := time.ParseDuration(timeout)
-		if err != nil {
+		if err == nil {
 			ServerTimeout = tmpTimeout
 		}
 	}
@@ -84,13 +87,14 @@ func startHTTPServer() *http.Server {
 	// in a 301 redirect
 	router := mux.NewRouter()
 	router = router.SkipClean(true)
-	router.HandleFunc("/proxy/{url:.*}", ProxyServeHTTPHandler).Methods("GET")
-	router.HandleFunc("/proxy/{url:.*}", ProxyServeHTTPHandler).Methods("POST")
+	router.HandleFunc("/proxy/{url:.*}", proxyServerHTTPHandler).Methods("GET")
+	router.HandleFunc("/proxy/{url:.*}", proxyServerHTTPHandler).Methods("POST")
 
 	srv := &http.Server{
 		Addr:    ":" + port,
 		Handler: router,
 	}
+	log.Printf("Starting HTTP server")
 
 	go func() {
 		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
@@ -111,8 +115,8 @@ func main() {
 
 	srv := startHTTPServer()
 	<-sigs
-	log.Printf("Stopping HTTP Server")
 
+	log.Printf("Stopping HTTP Server")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
